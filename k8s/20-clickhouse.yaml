@@ -1,0 +1,167 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ch-config
+  namespace: ch
+data:
+  # Cluster topology + Keeper wiring. Dropped into config.d so it merges with
+  # the image's stock config.xml.
+  cluster.xml: |
+    <clickhouse>
+      <listen_host>0.0.0.0</listen_host>
+      <zookeeper>
+        <node><host>chk-0.chk.ch.svc.cluster.local</host><port>9181</port></node>
+        <node><host>chk-1.chk.ch.svc.cluster.local</host><port>9181</port></node>
+        <node><host>chk-2.chk.ch.svc.cluster.local</host><port>9181</port></node>
+        <session_timeout_ms>30000</session_timeout_ms>
+        <operation_timeout_ms>10000</operation_timeout_ms>
+      </zookeeper>
+      <remote_servers>
+        <dr_cluster>
+          <shard>
+            <internal_replication>true</internal_replication>
+            <replica><host>chi-0.chi.ch.svc.cluster.local</host><port>9000</port></replica>
+            <replica><host>chi-1.chi.ch.svc.cluster.local</host><port>9000</port></replica>
+            <replica><host>chi-2.chi.ch.svc.cluster.local</host><port>9000</port></replica>
+          </shard>
+        </dr_cluster>
+      </remote_servers>
+      <distributed_ddl>
+        <path>/clickhouse/task_queue/ddl</path>
+      </distributed_ddl>
+      <!-- Surface replication problems fast instead of hanging for minutes. -->
+      <merge_tree>
+        <zookeeper_session_expiration_check_period>10</zookeeper_session_expiration_check_period>
+      </merge_tree>
+    </clickhouse>
+  users.xml: |
+    <clickhouse>
+      <profiles>
+        <default>
+          <!-- Off by default in 24.x; the failover test needs to see stale reads. -->
+          <select_sequential_consistency>0</select_sequential_consistency>
+        </default>
+      </profiles>
+      <users>
+        <default>
+          <password></password>
+          <networks><ip>::/0</ip></networks>
+          <profile>default</profile>
+          <quota>default</quota>
+          <access_management>1</access_management>
+        </default>
+      </users>
+    </clickhouse>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chi
+  namespace: ch
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: chi
+  ports:
+    - { name: http,        port: 8123 }
+    - { name: native,      port: 9000 }
+    - { name: interserver, port: 9009 }
+---
+# Load-balanced entry point: only routes to Ready replicas.
+apiVersion: v1
+kind: Service
+metadata:
+  name: chi-lb
+  namespace: ch
+spec:
+  selector:
+    app: chi
+  ports:
+    - { name: http,   port: 8123, targetPort: 8123 }
+    - { name: native, port: 9000, targetPort: 9000 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chi
+  namespace: ch
+spec:
+  serviceName: chi
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: chi
+  template:
+    metadata:
+      labels:
+        app: chi
+    spec:
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: { app: chi }
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: gen-macros
+          image: clickhouse/clickhouse-server:24.8
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              ORD=${HOSTNAME##*-}
+              cat > /confd/macros.xml <<EOX
+              <clickhouse>
+                <macros>
+                  <cluster>dr_cluster</cluster>
+                  <shard>01</shard>
+                  <replica>${HOSTNAME}</replica>
+                </macros>
+                <interserver_http_host>${HOSTNAME}.chi.ch.svc.cluster.local</interserver_http_host>
+              </clickhouse>
+              EOX
+              cat /confd/macros.xml
+          volumeMounts:
+            - { name: confd, mountPath: /confd }
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:24.8
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http,        containerPort: 8123 }
+            - { name: native,      containerPort: 9000 }
+            - { name: interserver, containerPort: 9009 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/clickhouse-server/config.d/cluster.xml, subPath: cluster.xml }
+            - { name: config, mountPath: /etc/clickhouse-server/users.d/users.xml,    subPath: users.xml }
+            - { name: confd,  mountPath: /etc/clickhouse-server/config.d/macros.xml,  subPath: macros.xml }
+            - { name: data,   mountPath: /var/lib/clickhouse }
+          readinessProbe:
+            httpGet: { path: /ping, port: 8123 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /ping, port: 8123 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+      volumes:
+        - name: config
+          configMap:
+            name: ch-config
+        - name: confd
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
