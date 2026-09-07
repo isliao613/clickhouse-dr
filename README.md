@@ -23,6 +23,7 @@ chk-0     chk-2     chk-1      <- ClickHouse Keeper (raft)
 | `scripts/test-node-down.sh` | Scenario 1 — one worker node killed |
 | `scripts/test-keeper-quorum-loss.sh` | Scenario 2 — Keeper below quorum |
 | `scripts/teardown.sh` | Delete the kind cluster |
+| `docs/insert-quorum.md` | How to change `insert_quorum` (per query / session / HTTP / permanent) |
 
 ```bash
 ./scripts/setup.sh
@@ -73,6 +74,10 @@ plus Keeper has it. If that replica dies before another replica fetches the
 part, the ack was a lie. `insert_quorum='auto'` is the setting that survives one
 node down *and* keeps the durability promise — a hard `insert_quorum=3` turns a
 single node failure into a full write outage.
+
+See [`docs/insert-quorum.md`](docs/insert-quorum.md) for how to actually change
+it, including the `subPath` ConfigMap gotcha that makes an edit look like a
+no-op.
 
 ### Recovery
 
