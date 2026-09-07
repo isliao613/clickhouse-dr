@@ -48,10 +48,8 @@ Cannot update user `default` in users.xml because this storage is readonly
 ### (b) `users.xml` profile — the cluster-wide default
 
 The `default` profile lives in the `ch-config` ConfigMap in
-[`k8s/20-clickhouse.yaml`](../k8s/20-clickhouse.yaml). The repo deliberately
-ships the ClickHouse default (`insert_quorum` unset, i.e. `0`) so the failure
-tests exercise stock behaviour; to make `auto` the cluster-wide default, add it
-to that profile:
+[`k8s/20-clickhouse.yaml`](../k8s/20-clickhouse.yaml). This repo sets `auto`
+there, so the whole lab defaults to a majority quorum:
 
 ```xml
 <profiles>

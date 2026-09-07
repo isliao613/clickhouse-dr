@@ -41,7 +41,7 @@ raft *leader*).
 | Keeper leader election | `chk-0` promoted to leader within ~20s |
 | `system.replicas.is_readonly` on survivors | `0` — stays writable |
 | `active_replicas` | `3` → `2` |
-| `INSERT` on `chi-0` (default `insert_quorum=0`) | succeeds, 0.29s |
+| `INSERT` on `chi-0` (stock `insert_quorum=0`) | succeeds, 0.29s |
 | `SELECT` on survivors | unaffected |
 | `SELECT ... FROM cluster('dr_cluster', …)` | succeeds, routed to a live replica |
 | `errors_count` for the dead host in `system.clusters` | stayed `0` (only bumped by actual distributed query attempts) |
@@ -73,7 +73,10 @@ Default `insert_quorum=0` means an `INSERT` is acked as soon as **one** replica
 plus Keeper has it. If that replica dies before another replica fetches the
 part, the ack was a lie. `insert_quorum='auto'` is the setting that survives one
 node down *and* keeps the durability promise — a hard `insert_quorum=3` turns a
-single node failure into a full write outage.
+single node failure into a full write outage. **This lab now ships
+`insert_quorum=auto` as the cluster-wide default** in the `ch-config` ConfigMap;
+the numbers above were measured against the stock `0`, and both survive one node
+down because `auto` resolves to 2 of 3.
 
 See [`docs/insert-quorum.md`](docs/insert-quorum.md) for how to actually change
 it, including the `subPath` ConfigMap gotcha that makes an edit look like a

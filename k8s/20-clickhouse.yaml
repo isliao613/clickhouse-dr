@@ -38,6 +38,9 @@ data:
     <clickhouse>
       <profiles>
         <default>
+          <!-- 'auto' = majority (2 of 3), so an ack means the write survived
+               one replica loss, and one node down is still writable. -->
+          <insert_quorum>auto</insert_quorum>
           <!-- Off by default in 24.x; the failover test needs to see stale reads. -->
           <select_sequential_consistency>0</select_sequential_consistency>
         </default>
