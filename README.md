@@ -23,7 +23,8 @@ chk-0     chk-2     chk-1      <- ClickHouse Keeper (raft)
 | `scripts/test-node-down.sh` | Scenario 1 — one worker node killed |
 | `scripts/test-keeper-quorum-loss.sh` | Scenario 2 — Keeper below quorum |
 | `scripts/teardown.sh` | Delete the kind cluster |
-| `docs/insert-quorum.md` | How to change `insert_quorum` (per query / session / HTTP / permanent) |
+| `docs/insert-quorum.md` | How to change `insert_quorum` (per query / session / HTTP / permanent), and what stock `0` does |
+| `docs/failure-domains.md` | Why Keeper and replica count are separate failure domains; ZooKeeper vs Keeper; co-location and tolerance math |
 
 ```bash
 ./scripts/setup.sh
@@ -126,9 +127,11 @@ writes resumed with no operator action.
    RRMT's dedup is orthogonal to availability; it only ever guarantees
    *eventual* collapse, so read with `FINAL`.
 3. **Keeper quorum, not replica count, is the write-availability boundary.**
-   3 Keeper members tolerate 1 loss. Do not co-locate Keeper members, and do
-   not run Keeper on the same failure domain pattern that would take two out at
-   once.
+   3 Keeper members tolerate 1 loss, and that is fixed by the consensus
+   algorithm — quorum is not a tunable setting, so the only way to tolerate more
+   is more members (5 → 2). Do not co-locate Keeper members, and do not run
+   Keeper on the same failure domain pattern that would take two out at once.
+   See [`docs/failure-domains.md`](docs/failure-domains.md).
 4. **Use `insert_quorum='auto'`** if you need "the ack means it survived a node
    loss". The default 0 trades durability for availability silently.
 5. **A Keeper outage presents as a hang.** Tune `insert_keeper_max_retries` and
